@@ -8,25 +8,24 @@ const TARGET_SIZES = [
 ];
 
 const REGION_LABELS = {
-  title: '主标题区域',
-  subtitle: '副标题区域',
-  logo: 'Logo 区域',
-  cta: 'CTA / 授权信息区域',
-  copyright: '版权信息区域',
-  subject: '主体视觉区域',
-  background: '背景区域',
-  decor: '装饰元素区域'
+  titleRegion: '主标题区域',
+  subtitleRegion: '副标题区域',
+  logoRegion: 'Logo 区域',
+  ctaRegion: 'CTA / 授权信息区域',
+  copyrightRegion: '版权信息区域',
+  subjectRegion: '主体视觉区域',
+  backgroundRegion: '背景区域'
 };
-
-const AI_MOCK_NOTICE = '当前为 mock 识别，后续可接入真实 AI 视觉识别服务。';
 
 function App() {
   const [imageSrc, setImageSrc] = useState('');
   const [imageEl, setImageEl] = useState(null);
+  const [file, setFile] = useState(null);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [renders, setRenders] = useState({});
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     if (!imageSrc) {
@@ -42,20 +41,33 @@ function App() {
   }, [imageSrc]);
 
   const onUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const selected = e.target.files?.[0];
+    if (!selected) return;
+    setFile(selected);
+    setErrorMsg('');
     const reader = new FileReader();
     reader.onload = () => setImageSrc(String(reader.result || ''));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(selected);
   };
 
   const handleAnalyze = async () => {
-    if (!imageEl) return;
+    if (!file) return;
     setAnalyzing(true);
-    const result = await analyzeImage(imageEl);
-    setAnalysisResult(result);
-    setRenders({});
-    setAnalyzing(false);
+    setErrorMsg('');
+    try {
+      const result = await analyzeImage(file);
+      setAnalysisResult(result);
+      setRenders({});
+
+      if (!isValidCoreRegion(result.subjectRegion) || !isValidCoreRegion(result.titleRegion)) {
+        setErrorMsg('识别结果不完整，请重新上传更清晰头图');
+      }
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : '分析失败，请稍后再试');
+      setAnalysisResult(null);
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
   const handleGenerate = async () => {
@@ -80,6 +92,8 @@ function App() {
     a.click();
   };
 
+  const regionKeys = [...Object.keys(REGION_LABELS), 'decorationRegions'];
+
   return (
     <div className="min-h-screen bg-slate-100 p-5">
       <div className="mx-auto grid max-w-[1700px] gap-4 lg:grid-cols-[430px,1fr]">
@@ -92,41 +106,32 @@ function App() {
             {imageSrc && <img src={imageSrc} alt="source" className="h-40 w-full rounded border object-contain bg-slate-50" />}
           </div>
 
-          <button
-            className="w-full rounded bg-slate-900 py-2 text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-            onClick={handleAnalyze}
-            disabled={!imageEl || analyzing}
-          >
+          <button className="w-full rounded bg-slate-900 py-2 text-white disabled:cursor-not-allowed disabled:bg-slate-400" onClick={handleAnalyze} disabled={!file || analyzing}>
             {analyzing ? '分析中...' : '自动分析头图结构'}
           </button>
+
+          {errorMsg && <p className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-800">{errorMsg}</p>}
 
           <div className="space-y-2 rounded border bg-slate-50 p-3">
             <h2 className="font-semibold">AI 识别结果</h2>
             {!analysisResult && <p className="text-sm text-slate-600">请先上传头图并执行自动分析。</p>}
             {analysisResult && (
               <ul className="space-y-2 text-sm">
-                {Object.entries(analysisResult.regions).map(([key, rect]) => (
+                {regionKeys.map((key) => (
                   <li key={key} className="rounded border bg-white p-2">
-                    <p className="font-medium">{REGION_LABELS[key]}</p>
-                    <p className="text-slate-600">
-                      x:{Math.round(rect.x)} y:{Math.round(rect.y)} w:{Math.round(rect.width)} h:{Math.round(rect.height)}
-                    </p>
+                    <p className="font-medium">{key === 'decorationRegions' ? '装饰元素区域' : REGION_LABELS[key]}</p>
+                    <pre className="overflow-x-auto text-xs text-slate-600">{JSON.stringify(analysisResult[key], null, 2)}</pre>
                   </li>
                 ))}
               </ul>
             )}
           </div>
 
-          <button
-            className="w-full rounded bg-blue-600 py-2 text-white disabled:cursor-not-allowed disabled:bg-blue-300"
-            onClick={handleGenerate}
-            disabled={!analysisResult || generating}
-          >
+          <button className="w-full rounded bg-blue-600 py-2 text-white disabled:cursor-not-allowed disabled:bg-blue-300" onClick={handleGenerate} disabled={!analysisResult || generating}>
             {generating ? '生成中...' : '生成多尺寸延展图'}
           </button>
 
           {!analysisResult && <p className="text-sm text-amber-700">未完成识别前不允许生成延展图。</p>}
-          <p className="rounded border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-slate-700">{AI_MOCK_NOTICE}</p>
         </section>
 
         <section className="rounded-xl border bg-white p-4">
@@ -140,9 +145,7 @@ function App() {
                     下载 PNG
                   </button>
                 </div>
-                <div className="rounded border bg-slate-50 p-2">
-                  {renders[s.key] ? <img src={renders[s.key]} alt={s.key} className="w-full object-contain" /> : <div className="h-44" />}
-                </div>
+                <div className="rounded border bg-slate-50 p-2">{renders[s.key] ? <img src={renders[s.key]} alt={s.key} className="w-full object-contain" /> : <div className="h-44" />}</div>
               </article>
             ))}
           </div>
@@ -152,28 +155,25 @@ function App() {
   );
 }
 
-async function analyzeImage(image) {
-  await new Promise((r) => setTimeout(r, 450));
+function isValidCoreRegion(region) {
+  return region && region.width > 0 && region.height > 0 && region.confidence > 0;
+}
 
-  const w = image.width;
-  const h = image.height;
-  const pad = Math.round(Math.min(w, h) * 0.04);
+async function analyzeImage(file) {
+  const formData = new FormData();
+  formData.append('image', file);
 
-  return {
-    version: 'mock-v1',
-    mode: 'mock',
-    createdAt: new Date().toISOString(),
-    regions: {
-      title: { x: pad, y: pad, width: w * 0.5, height: h * 0.16 },
-      subtitle: { x: pad, y: h * 0.2, width: w * 0.52, height: h * 0.12 },
-      logo: { x: w - w * 0.18 - pad, y: pad, width: w * 0.18, height: h * 0.13 },
-      cta: { x: pad, y: h * 0.72, width: w * 0.35, height: h * 0.13 },
-      copyright: { x: pad, y: h * 0.88, width: w * 0.45, height: h * 0.09 },
-      subject: { x: w * 0.5, y: h * 0.12, width: w * 0.45, height: h * 0.72 },
-      background: { x: 0, y: 0, width: w, height: h },
-      decor: { x: w * 0.7, y: h * 0.02, width: w * 0.28, height: h * 0.22 }
-    }
-  };
+  const response = await fetch('/api/analyze-image', {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || body.message || '调用后端分析接口失败');
+  }
+
+  return response.json();
 }
 
 function renderFromAnalysis({ size, imageEl, analysisResult }) {
@@ -182,18 +182,19 @@ function renderFromAnalysis({ size, imageEl, analysisResult }) {
   canvas.height = size.height;
   const ctx = canvas.getContext('2d');
 
-  const { regions } = analysisResult;
-
-  drawExpandedBackground(ctx, imageEl, sanitizeRect(regions.background, imageEl), size);
+  drawExpandedBackground(ctx, imageEl, sanitizeRect(analysisResult.backgroundRegion, imageEl), size);
 
   const layout = getLayout(size);
-  drawPreservedRegion(ctx, imageEl, sanitizeRect(regions.subject, imageEl), layout.visual, 0.95);
+  drawPreservedRegion(ctx, imageEl, sanitizeRect(analysisResult.subjectRegion, imageEl), layout.visual, 0.95);
 
-  ['title', 'subtitle', 'logo', 'cta', 'copyright'].forEach((key) => {
-    drawPreservedRegion(ctx, imageEl, sanitizeRect(regions[key], imageEl), layout.textZones[key], 1);
+  ['titleRegion', 'subtitleRegion', 'logoRegion', 'ctaRegion', 'copyrightRegion'].forEach((key) => {
+    drawPreservedRegion(ctx, imageEl, sanitizeRect(analysisResult[key], imageEl), layout.textZones[key], 1);
   });
 
-  drawPreservedRegion(ctx, imageEl, sanitizeRect(regions.decor, imageEl), layout.decor, 1);
+  const firstDecor = analysisResult.decorationRegions?.[0];
+  if (firstDecor) {
+    drawPreservedRegion(ctx, imageEl, sanitizeRect(firstDecor, imageEl), layout.decor, 1);
+  }
 
   return canvas.toDataURL('image/png');
 }
@@ -206,11 +207,11 @@ function getLayout(size) {
     return {
       visual: { x: leftW, y: 0, width: size.width - leftW, height: size.height },
       textZones: {
-        title: { x: 28, y: 24, width: leftW - 56, height: size.height * 0.22 },
-        subtitle: { x: 28, y: size.height * 0.25, width: leftW - 56, height: size.height * 0.16 },
-        logo: { x: 28, y: size.height * 0.43, width: leftW * 0.42, height: size.height * 0.2 },
-        cta: { x: 28, y: size.height * 0.68, width: leftW - 56, height: size.height * 0.14 },
-        copyright: { x: 28, y: size.height * 0.84, width: leftW - 56, height: size.height * 0.12 }
+        titleRegion: { x: 28, y: 24, width: leftW - 56, height: size.height * 0.22 },
+        subtitleRegion: { x: 28, y: size.height * 0.25, width: leftW - 56, height: size.height * 0.16 },
+        logoRegion: { x: 28, y: size.height * 0.43, width: leftW * 0.42, height: size.height * 0.2 },
+        ctaRegion: { x: 28, y: size.height * 0.68, width: leftW - 56, height: size.height * 0.14 },
+        copyrightRegion: { x: 28, y: size.height * 0.84, width: leftW - 56, height: size.height * 0.12 }
       },
       decor: { x: size.width - size.width * 0.24, y: 18, width: size.width * 0.2, height: size.height * 0.22 }
     };
@@ -220,11 +221,11 @@ function getLayout(size) {
   return {
     visual: { x: 0, y: textH, width: size.width, height: size.height - textH },
     textZones: {
-      title: { x: 36, y: 28, width: size.width - 72, height: textH * 0.22 },
-      subtitle: { x: 36, y: textH * 0.24, width: size.width - 72, height: textH * 0.16 },
-      logo: { x: 36, y: textH * 0.42, width: size.width * 0.24, height: textH * 0.2 },
-      cta: { x: 36, y: textH * 0.67, width: size.width * 0.5, height: textH * 0.14 },
-      copyright: { x: 36, y: textH * 0.82, width: size.width * 0.6, height: textH * 0.12 }
+      titleRegion: { x: 36, y: 28, width: size.width - 72, height: textH * 0.22 },
+      subtitleRegion: { x: 36, y: textH * 0.24, width: size.width - 72, height: textH * 0.16 },
+      logoRegion: { x: 36, y: textH * 0.42, width: size.width * 0.24, height: textH * 0.2 },
+      ctaRegion: { x: 36, y: textH * 0.67, width: size.width * 0.5, height: textH * 0.14 },
+      copyrightRegion: { x: 36, y: textH * 0.82, width: size.width * 0.6, height: textH * 0.12 }
     },
     decor: { x: size.width - size.width * 0.2, y: textH * 0.48, width: size.width * 0.16, height: textH * 0.34 }
   };
@@ -259,10 +260,10 @@ function drawPreservedRegion(ctx, imageEl, sourceRect, targetRect, fillRate = 1)
 
 function sanitizeRect(rect, image) {
   return {
-    x: Math.max(0, Math.min(rect.x, image.width - 1)),
-    y: Math.max(0, Math.min(rect.y, image.height - 1)),
-    width: Math.max(1, Math.min(rect.width, image.width)),
-    height: Math.max(1, Math.min(rect.height, image.height))
+    x: Math.max(0, Math.min(rect?.x ?? 0, image.width - 1)),
+    y: Math.max(0, Math.min(rect?.y ?? 0, image.height - 1)),
+    width: Math.max(1, Math.min(rect?.width ?? image.width, image.width)),
+    height: Math.max(1, Math.min(rect?.height ?? image.height, image.height))
   };
 }
 
